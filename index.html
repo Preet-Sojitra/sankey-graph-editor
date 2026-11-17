@@ -12,7 +12,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sankey Graph Editor</title>
+<title>Sankey Graph Editor: free online Sankey diagram maker for papers</title>
+<meta name="description" content="Free, open-source Sankey diagram editor that runs in your browser. Drag every node, ribbon and curve by hand, then export clean SVG, PDF or PNG for papers and slides.">
+<meta name="author" content="Preet Sojitra">
+<meta name="theme-color" content="#4a7cff">
+<link rel="canonical" href="https://preet-sojitra.github.io/sankey-graph-editor/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='4' width='5' height='24' fill='%23a8dcc4'/%3E%3Crect x='25' y='4' width='5' height='11' fill='%23b8c4f0'/%3E%3Crect x='25' y='18' width='5' height='10' fill='%23f0b8c8'/%3E%3Cpath d='M7 4C16 4 16 4 25 4V15C16 15 16 15 7 15Z' fill='%23b8c4f0'/%3E%3Cpath d='M7 15C16 15 16 18 25 18V28C16 28 16 28 7 28Z' fill='%23f0b8c8'/%3E%3C/svg%3E">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Sankey Graph Editor">
+<meta property="og:description" content="Drag every node, ribbon and curve by hand. Export SVG / PDF / PNG for papers. Free, open source, runs in your browser.">
+<meta property="og:url" content="https://preet-sojitra.github.io/sankey-graph-editor/">
+<meta property="og:image" content="https://preet-sojitra.github.io/sankey-graph-editor/docs/screenshot.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Sankey Graph Editor","applicationCategory":"DesignApplication","operatingSystem":"Any (web browser)","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Free, open-source Sankey diagram editor. Drag nodes, ribbons and curves by hand and export SVG, PDF or PNG.","url":"https://preet-sojitra.github.io/sankey-graph-editor/","author":{"@type":"Person","name":"Preet Sojitra"}}</script>
 <style>
 :root{--b:#e3e3e8;--fg:#1f2328;--mut:#6b7280;--acc:#4a7cff}
 *{box-sizing:border-box}
@@ -20,7 +32,7 @@ html,body{height:100%}
 body{margin:0;font:13px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--fg);background:#f4f4f6;overflow:hidden}
 #app{display:grid;grid-template-rows:auto 1fr;height:100vh}
 header{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 8px;background:#fff;border-bottom:1px solid var(--b)}
-.brand{font-weight:650;margin-right:8px;white-space:nowrap}
+.brand{font-size:inherit;margin:0;font-weight:650;margin-right:8px;white-space:nowrap}
 .grp{display:flex;align-items:center;gap:3px;padding-right:8px;margin-right:2px;border-right:1px solid var(--b)}
 .grp:last-child{border:0}
 .lbl{color:var(--mut);margin-right:2px}
@@ -67,7 +79,7 @@ kbd{font:11px ui-monospace,Menlo,monospace;background:#f3f3f5;border:1px solid #
 <body>
 <div id="app">
 <header>
-  <span class="brand">Sankey Graph Editor</span>
+  <h1 class="brand">Sankey Graph Editor</h1>
   <div class="grp"><button data-act="addNode" title="Add node (N)">+ Node</button><button data-act="addRibbon" title="Add ribbon (R)">+ Ribbon</button></div>
   <div class="grp"><button id="bUndo" data-act="undo" title="Undo (Ctrl/⌘+Z)">Undo</button><button id="bRedo" data-act="redo" title="Redo (Ctrl/⌘+Shift+Z or Ctrl+Y)">Redo</button></div>
   <div class="grp"><button data-act="zoomOut" title="Zoom out (−)">−</button><button data-act="zoomIn" title="Zoom in (+)">+</button><button data-act="fit" title="Fit to content (0)">Fit</button></div>
@@ -97,6 +109,10 @@ kbd{font:11px ui-monospace,Menlo,monospace;background:#f3f3f5;border:1px solid #
         <li><kbd>N</kbd> new node · <kbd>R</kbd> new ribbon · <kbd>?</kbd> toggle this help</li>
       </ul>
       <p class="hint">Your work is autosaved in this browser. Use <b>Save</b> to keep a .json copy you can reopen or share.</p>
+    </details>
+    <details class="help">
+      <summary>About</summary>
+      <p class="hint">Sankey Graph Editor is a free, open-source Sankey diagram maker that runs entirely in your browser. Unlike tools that lay out the diagram for you, it lets you place every node and shape every ribbon by hand, which is what you need for figures in research papers, theses and slides. Export clean vector SVG or PDF (or PNG), with your paper's font. Nothing is uploaded; your work stays on your computer.</p>
     </details>
     <div class="credit">By Preet Sojitra · contributions by Claude (Anthropic) · MIT License · <a href="https://github.com/Preet-Sojitra/sankey-graph-editor" target="_blank" rel="noopener">GitHub</a></div>
   </aside>
