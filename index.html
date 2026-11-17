@@ -1,0 +1,827 @@
+<!doctype html>
+<!--
+  Sankey Graph Editor — a free-form, single-file editor for Sankey / ribbon diagrams.
+  Every node and ribbon can be placed, resized and curved by hand, then exported
+  as clean SVG / PDF / PNG for papers and slides.
+
+  Author: Preet Sojitra · Contributor: Claude (Anthropic)
+  License: MIT (see LICENSE)
+  No build step, no dependencies: open this file in a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sankey Graph Editor</title>
+<style>
+:root{--b:#e3e3e8;--fg:#1f2328;--mut:#6b7280;--acc:#4a7cff}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font:13px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--fg);background:#f4f4f6;overflow:hidden}
+#app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:6px 8px;background:#fff;border-bottom:1px solid var(--b)}
+.brand{font-weight:650;margin-right:8px;white-space:nowrap}
+.grp{display:flex;align-items:center;gap:3px;padding-right:8px;margin-right:2px;border-right:1px solid var(--b)}
+.grp:last-child{border:0}
+.lbl{color:var(--mut);margin-right:2px}
+button{font:inherit;padding:4px 9px;border:1px solid #d0d0d7;background:#fff;border-radius:6px;cursor:pointer;color:inherit;white-space:nowrap}
+button:hover:not(:disabled){background:#f0f3ff;border-color:#b9c7ff}
+button:disabled{opacity:.4;cursor:default}
+input,select,textarea{font:inherit;padding:3px 5px;border:1px solid #d0d0d7;border-radius:4px;background:#fff;color:inherit}
+textarea{resize:vertical}
+input[type=color]{width:38px;height:24px;padding:1px;flex:none}
+main{display:flex;min-height:0}
+#stage{position:relative;flex:1;min-width:0}
+#cv{display:block;width:100%;height:100%;background-color:#fff;background-image:radial-gradient(#d4d4d8 1.2px,transparent 1.2px);touch-action:none;user-select:none;-webkit-user-select:none}
+#cv.nogrid{background-image:none}
+#cv.space{cursor:grab}#cv.panning{cursor:grabbing}
+#out [data-k]{cursor:move}
+#ui [data-h=newr]{cursor:crosshair}#ui [data-h=nw]{cursor:ew-resize}
+#ui [data-h=nh],#ui [data-h=nt],#ui [data-h=sw],#ui [data-h=ew]{cursor:ns-resize}
+#ui [data-h=sm],#ui [data-h=em],#ui [data-h=c1],#ui [data-h=c2]{cursor:move}
+#status{position:absolute;left:8px;bottom:6px;font:11px ui-monospace,Menlo,monospace;color:var(--mut);background:#ffffffd9;padding:2px 6px;border-radius:4px;pointer-events:none}
+#toast{position:absolute;left:50%;bottom:20px;transform:translate(-50%,8px);background:#1f2328;color:#fff;padding:7px 12px;border-radius:6px;opacity:0;transition:.18s;pointer-events:none;max-width:80%}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+#drop{position:absolute;inset:8px;border:2px dashed var(--acc);border-radius:10px;background:#4a7cff14;display:none;align-items:center;justify-content:center;font-size:16px;color:var(--acc);pointer-events:none}
+#drop.on{display:flex}
+aside{width:310px;flex:none;overflow:auto;background:#fff;border-left:1px solid var(--b);padding:10px 12px 20px}
+h3{margin:4px 0 8px;font-size:14px}
+h4{margin:14px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+.row{display:flex;align-items:center;gap:6px;margin:5px 0}
+.row.top{align-items:flex-start}
+.row>label{width:86px;flex:none;color:#555}
+.row input[type=range]{flex:1;min-width:0}
+.row input[type=number]{width:66px;flex:none}
+.row input[type=text],.row textarea,.row select{flex:1;min-width:0}
+.row input[type=checkbox]{margin:0}
+.btns{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.btns button{padding:3px 7px}
+.hint{color:var(--mut);font-size:12px;margin:4px 0}
+details{margin-top:16px;border-top:1px solid var(--b);padding-top:8px}
+summary{cursor:pointer;font-weight:600}
+.help ul{padding-left:16px;margin:6px 0}.help li{margin:3px 0}
+kbd{font:11px ui-monospace,Menlo,monospace;background:#f3f3f5;border:1px solid #ddd;border-bottom-width:2px;border-radius:3px;padding:0 4px}
+.credit{margin-top:14px;color:var(--mut);font-size:11px}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <span class="brand">Sankey Graph Editor</span>
+  <div class="grp"><button data-act="addNode" title="Add node (N)">+ Node</button><button data-act="addRibbon" title="Add ribbon (R)">+ Ribbon</button></div>
+  <div class="grp"><button id="bUndo" data-act="undo" title="Undo (Ctrl/⌘+Z)">Undo</button><button id="bRedo" data-act="redo" title="Redo (Ctrl/⌘+Shift+Z or Ctrl+Y)">Redo</button></div>
+  <div class="grp"><button data-act="zoomOut" title="Zoom out (−)">−</button><button data-act="zoomIn" title="Zoom in (+)">+</button><button data-act="fit" title="Fit to content (0)">Fit</button></div>
+  <div class="grp"><button data-act="newDoc">New</button><button data-act="open" title="Open project .json (or drop it on the canvas)">Open…</button><button data-act="save" title="Save project .json (Ctrl/⌘+S)">Save</button></div>
+  <div class="grp"><span class="lbl">Export</span><button data-act="exportSVG" title="Vector SVG">SVG</button><button data-act="exportPDF" title="Vector PDF via the print dialog">PDF</button><button data-act="exportPNG">PNG</button><select id="pngScale" title="PNG scale"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select><button data-act="copySVG" title="Copy SVG markup to the clipboard">Copy SVG</button></div>
+</header>
+<main>
+  <div id="stage">
+    <svg id="cv" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="status"></div>
+    <div id="drop">Drop a project .json to open it</div>
+    <div id="toast"></div>
+  </div>
+  <aside>
+    <div id="panel"></div>
+    <details id="help" class="help">
+      <summary>Mouse &amp; keyboard</summary>
+      <ul>
+        <li><b>Drag</b> a node or ribbon to move it. Ribbon ends touching a node move with the node.</li>
+        <li><b>Shift+click</b> adds to the selection; <b>Shift+drag</b> on empty canvas draws a selection box.</li>
+        <li><b>Node:</b> drag the green dot to pull out a new ribbon; blue dots resize. Double-click to edit its label.</li>
+        <li><b>Ribbon:</b> orange dots move the ends (they snap to node edges and stack under neighbouring ribbons; hold <kbd>Alt</kbd> to stop snapping). Blue squares change the width. Purple diamonds bend the curve freely (<kbd>Shift</kbd> keeps the tangent horizontal).</li>
+        <li><b>Labels</b> can be dragged to fine-tune their position.</li>
+        <li><b>Pan:</b> drag empty canvas, hold <kbd>Space</kbd>, or use the middle mouse button. <b>Zoom:</b> mouse wheel / pinch, <kbd>+</kbd> <kbd>−</kbd>, <kbd>0</kbd> = fit.</li>
+        <li><kbd>Arrows</kbd> nudge (<kbd>Shift</kbd> = 10) · <kbd>Del</kbd> delete · <kbd>Esc</kbd> deselect / cancel drag</li>
+        <li><kbd>Ctrl/⌘</kbd> + <kbd>Z</kbd> undo · <kbd>Shift+Z</kbd>/<kbd>Y</kbd> redo · <kbd>D</kbd> duplicate · <kbd>C</kbd>/<kbd>X</kbd>/<kbd>V</kbd> copy/cut/paste · <kbd>A</kbd> select all · <kbd>S</kbd> save</li>
+        <li><kbd>N</kbd> new node · <kbd>R</kbd> new ribbon · <kbd>?</kbd> toggle this help</li>
+      </ul>
+      <p class="hint">Your work is autosaved in this browser. Use <b>Save</b> to keep a .json copy you can reopen or share.</p>
+    </details>
+    <div class="credit">By Preet Sojitra · contributions by Claude (Anthropic) · MIT License · <a href="https://github.com/Preet-Sojitra/sankey-graph-editor" target="_blank" rel="noopener">GitHub</a></div>
+  </aside>
+</main>
+</div>
+<input type="file" id="fileIn" hidden accept=".json,application/json">
+<datalist id="fontList"></datalist>
+
+<script>
+'use strict';
+/* ==================================================================
+   Constants & defaults
+   ================================================================== */
+const LS_DOC = 'ribbon_editor', LS_PREF = 'ribbon_editor_prefs', HIST_MAX = 300;
+const FONTS = ['Arial, Helvetica, sans-serif', '"Times New Roman", Times, serif', '"Latin Modern Roman", "CMU Serif", serif',
+  'Helvetica, Arial, sans-serif', 'Georgia, serif', 'Verdana, sans-serif', '"Courier New", monospace'];
+const LPOS = ['right', 'left', 'top', 'bottom', 'inside', 'none'];
+const NODE_DEF = {label: 'Node', x: 0, y: 0, w: 24, h: 100, rx: 0, color: '#b3b3b3', op: 1, bon: true, bc: '#333333', bw: .8,
+  lpos: 'right', fs: 14, fc: '#222222', bold: false, ldx: 0, ldy: 0};
+const RIB_DEF = {sx: 0, sy: 0, tx: 200, ty: 0, w1: 60, w2: 60, lockW: false, curv: .5, cmode: 'auto', c1x: 0, c1y: 0, c2x: 0, c2y: 0,
+  color: '#dcdce3', grad: false, color2: '#a8dcc4', op: 1, bon: false, bc: '#888888', bw: 1,
+  label: '', fs: 12, fc: '#222222', bold: false, ldx: 0, ldy: 0};
+const SET_DEF = {name: 'sankey', font: FONTS[0], bg: 'none', pad: 10};
+const PREF_DEF = {snap: false, grid: 10, showGrid: true, wheel: 'zoom', pngScale: 4};
+const COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]{3,20}|(rgb|hsl)a?\([\d.,\s%deg]+\))$/i;
+const COLOR_KEYS = ['color', 'color2', 'bc', 'fc'];
+
+/* ==================================================================
+   State
+   ================================================================== */
+const $ = s => document.querySelector(s);
+const cv = $('#cv'), panel = $('#panel'), statusEl = $('#status'), toastEl = $('#toast'), fileIn = $('#fileIn');
+let doc, prefs, sel = [], drag = null, uid = 0, hist = [], redoS = [], pending = null, raf = 0, spaceDown = false, clip = null, saveT = 0;
+let view = {x: 0, y: 0, w: 1200, h: 700};
+
+/* ==================================================================
+   Small utilities
+   ================================================================== */
+const r2 = v => Math.round(v * 100) / 100;
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/[<]/g, '&lt;').replace(/>/g, '&gt;');
+const escA = s => esc(s).replace(/"/g, '&quot;');
+const clone = o => JSON.parse(JSON.stringify(o));
+const scale = () => view.w / (cv.clientWidth || 1);           // user units per screen pixel
+const list = k => k === 'n' ? doc.nodes : doc.ribbons;
+const byId = (k, id) => list(k).find(o => o.id === id);
+const isSel = (k, id) => sel.some(s => s.k === k && s.id === id);
+const selObjs = () => sel.map(s => ({k: s.k, id: s.id, o: byId(s.k, s.id)})).filter(s => s.o);
+const prim = () => { const a = selObjs(); return a[a.length - 1] || null; };
+const selNodes = () => selObjs().filter(s => s.k === 'n').map(s => s.o);
+const sn = (v, e) => prefs.snap && !(e && e.altKey) ? Math.round(v / prefs.grid) * prefs.grid : Math.round(v);
+const nextId = () => ++uid;
+const fixUid = () => { uid = Math.max(uid, 0, ...doc.nodes.map(n => n.id), ...doc.ribbons.map(r => r.id)); };
+const ctx2d = document.createElement('canvas').getContext('2d');
+function hex(c) { ctx2d.fillStyle = '#000'; ctx2d.fillStyle = c; const v = ctx2d.fillStyle; return /^#[0-9a-f]{6}$/i.test(v) ? v : '#000000'; }
+function toast(msg, ms = 2600) { toastEl.textContent = msg; toastEl.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => toastEl.classList.remove('on'), ms); }
+function pt(e) { const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(cv.getScreenCTM().inverse()); return [p.x, p.y]; }
+function stamp() { const d = new Date(), z = n => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`; }
+function fileName(ext) { return (String(doc.settings.name || 'sankey').replace(/[^\w.-]+/g, '_') || 'sankey') + '.' + ext; }
+function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+
+/* ==================================================================
+   Document model: validation / migration (old files keep working)
+   ================================================================== */
+function cleanObj(o, def) {
+  const r = {};
+  for (const k in def) {
+    const d = def[k]; let v = o[k];
+    if (typeof d === 'number') { v = Number(v); if (v === undefined || !Number.isFinite(v)) v = d; }
+    else if (typeof d === 'boolean') v = v === undefined || v === null ? d : !!v;
+    else { v = v === undefined || v === null ? d : String(v); if (COLOR_KEYS.includes(k) && !COLOR_RE.test(v.trim())) v = d; }
+    r[k] = v;
+  }
+  if (!LPOS.includes(r.lpos)) r.lpos = 'right';
+  if (r.cmode !== 'custom') r.cmode = 'auto';
+  return r;
+}
+function normalize(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes) || !Array.isArray(raw.ribbons))
+    throw new Error('This is not a Sankey Graph Editor project (it needs "nodes" and "ribbons").');
+  const used = new Set(), out = [];
+  const take = (o, def) => {
+    const r = cleanObj(o || {}, def), id = Number(o && o.id);
+    r.id = Number.isInteger(id) && id > 0 && !used.has(id) ? id : null; if (r.id) used.add(r.id);
+    if ('label' in def && o && o.label === undefined && def === NODE_DEF) r.label = '';
+    out.push(r); return r;
+  };
+  const nodes = raw.nodes.map(n => take(n, NODE_DEF)), ribbons = raw.ribbons.map(r => take(r, RIB_DEF));
+  let m = Math.max(0, ...used); out.forEach(o => { if (!o.id) o.id = ++m; });
+  nodes.forEach(n => { n.w = Math.max(1, n.w); n.h = Math.max(1, n.h); });
+  ribbons.forEach(r => { r.w1 = Math.max(0, r.w1); r.w2 = Math.max(0, r.w2); });
+  const s = cleanObj(raw.settings || {}, SET_DEF);
+  if (s.bg !== 'none' && !COLOR_RE.test(s.bg)) s.bg = 'none';
+  s.pad = Math.max(0, s.pad);
+  return {version: 2, settings: s, nodes, ribbons};
+}
+function demoDoc() {
+  const N = (id, label, x, y, h, color) => ({...NODE_DEF, id, label, x, y, h, color});
+  const R = (id, sx, sy, tx, ty, w, color, extra) => ({...RIB_DEF, id, sx, sy, tx, ty, w1: w, w2: w, lockW: true, color, ...extra});
+  return {version: 2, settings: {...SET_DEF}, nodes: [
+    N(1, 'Images', 60, 60, 300, '#a8dcc4'), N(2, 'Text', 60, 420, 160, '#f2c6a0'),
+    N(3, 'Encoder', 460, 140, 460, '#b8c4f0'), N(4, 'Task A', 860, 60, 260, '#c9b8e8'), N(5, 'Task B', 860, 400, 200, '#f0b8c8')],
+  ribbons: [R(6, 84, 60, 460, 140, 300, '#a8dcc4', {op: .75}), R(7, 84, 420, 460, 440, 160, '#f2c6a0', {op: .75}),
+    R(8, 484, 140, 860, 60, 260, '#b8c4f0', {grad: true, color2: '#c9b8e8', op: .8}),
+    R(9, 484, 400, 860, 400, 200, '#b8c4f0', {grad: true, color2: '#f0b8c8', op: .8})]};
+}
+function emptyDoc() { return {version: 2, settings: {...SET_DEF}, nodes: [], ribbons: []}; }
+
+/* ==================================================================
+   Geometry
+   ================================================================== */
+// Bezier control offsets [c1x,c1y,c2x,c2y]: c1 is relative to the start, c2 relative to the end.
+function ctrl(r) { if (r.cmode === 'custom') return [r.c1x, r.c1y, r.c2x, r.c2y]; const c = (r.tx - r.sx) * r.curv; return [c, 0, -c, 0]; }
+function ribbonPath(r) {
+  const [a, b, c, d] = ctrl(r), P = (x, y) => r2(x) + ',' + r2(y);
+  return `M${P(r.sx, r.sy)}C${P(r.sx + a, r.sy + b)} ${P(r.tx + c, r.ty + d)} ${P(r.tx, r.ty)}` +
+    `L${P(r.tx, r.ty + r.w2)}C${P(r.tx + c, r.ty + r.w2 + d)} ${P(r.sx + a, r.sy + r.w1 + b)} ${P(r.sx, r.sy + r.w1)}Z`;
+}
+function ribbonMid(r) {
+  const [a, b, c, d] = ctrl(r), y0 = r.sy + r.w1 / 2, y3 = r.ty + r.w2 / 2;
+  return [(r.sx + 3 * (r.sx + a) + 3 * (r.tx + c) + r.tx) / 8, (y0 + 3 * (y0 + b) + 3 * (y3 + d) + y3) / 8];
+}
+// Ribbons whose start sits on the node's right edge (s) or whose end sits on its left edge (t).
+function attached(n, T = 1.5) {
+  const a = [];
+  for (const r of doc.ribbons) {
+    const sm = r.sy + r.w1 / 2, tm = r.ty + r.w2 / 2;
+    const s = Math.abs(r.sx - (n.x + n.w)) < T && sm >= n.y - T && sm <= n.y + n.h + T;
+    const t = Math.abs(r.tx - n.x) < T && tm >= n.y - T && tm <= n.y + n.h + T;
+    if (s || t) a.push({r, s, t});
+  }
+  return a;
+}
+// Snap a ribbon end to a node edge, then vertically to the node top/bottom or to neighbouring ribbons (stacking).
+function magnetEnd(r, end, x, y, e) {
+  if (e.altKey) return [x, y, null];
+  const k = scale(), TX = 12 * k, TY = 8 * k, w = end === 's' ? r.w1 : r.w2;
+  let node = null;
+  for (const n of doc.nodes) {
+    const ex = end === 's' ? n.x + n.w : n.x, mid = y + w / 2;
+    if (Math.abs(x - ex) < TX && mid >= n.y - TX && mid <= n.y + n.h + TX) { node = n; x = ex; break; }
+  }
+  if (!node) return [x, y, null];
+  const c = [node.y, node.y + node.h - w];
+  for (const q of doc.ribbons) {
+    if (q === r) continue;
+    if (end === 's' && Math.abs(q.sx - x) < 1.5) c.push(q.sy + q.w1, q.sy - w);
+    if (end === 't' && Math.abs(q.tx - x) < 1.5) c.push(q.ty + q.w2, q.ty - w);
+  }
+  let best = TY; for (const v of c) { const dd = Math.abs(v - y); if (dd < best) { best = dd; y = v; } }
+  return [x, y, {x, y1: node.y, y2: node.y + node.h}];
+}
+
+/* ==================================================================
+   Rendering
+   ================================================================== */
+function textEl(lines, x, y, anchor, o, font, kind, id) {
+  const lh = o.fs * 1.2;
+  const attrs = `x="${r2(x)}" y="${r2(y)}" font-family="${escA(font)}" font-size="${o.fs}" fill="${o.fc}" text-anchor="${anchor}"` +
+    `${o.bold ? ' font-weight="bold"' : ''} data-k="${kind}" data-id="${id}"`;
+  const body = lines.length === 1 ? esc(lines[0]) :
+    lines.map((l, i) => `<tspan x="${r2(x)}"${i ? ` dy="${r2(lh)}"` : ''}>${esc(l) || '&#160;'}<\/tspan>`).join('');
+  return `<text ${attrs}>${body}<\/text>`;
+}
+function nodeLabel(n, font) {
+  if (!n.label || n.lpos === 'none') return '';
+  const L = String(n.label).split('\n'), fs = n.fs, g = 6, blk = (L.length - 1) * fs * 1.2, vc = n.y + n.h / 2 - blk / 2 + fs * .35;
+  let x, y, a;
+  switch (n.lpos) {
+    case 'left': x = n.x - g; y = vc; a = 'end'; break;
+    case 'top': x = n.x + n.w / 2; y = n.y - g - blk; a = 'middle'; break;
+    case 'bottom': x = n.x + n.w / 2; y = n.y + n.h + g + fs * .8; a = 'middle'; break;
+    case 'inside': x = n.x + n.w / 2; y = vc; a = 'middle'; break;
+    default: x = n.x + n.w + g; y = vc; a = 'start';
+  }
+  return textEl(L, x + n.ldx, y + n.ldy, a, n, font, 'ln', n.id);
+}
+function ribbonLabel(r, font) {
+  if (!r.label) return '';
+  const L = String(r.label).split('\n'), [mx, my] = ribbonMid(r), blk = (L.length - 1) * r.fs * 1.2;
+  return textEl(L, mx + r.ldx, my - blk / 2 + r.fs * .35 + r.ldy, 'middle', r, font, 'lr', r.id);
+}
+function draw() {
+  cancelAnimationFrame(raf); raf = 0;
+  const font = doc.settings.font; let defs = '', rib = '', nod = '', lab = '';
+  for (const r of doc.ribbons) {
+    let fill = r.color;
+    if (r.grad) {
+      const gid = 'grad' + r.id;
+      defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="${r2(r.sx)}" y1="${r2(r.sy + r.w1 / 2)}" x2="${r2(r.tx)}" y2="${r2(r.ty + r.w2 / 2)}">` +
+        `<stop offset="0" stop-color="${r.color}"/><stop offset="1" stop-color="${r.color2}"/><\/linearGradient>`;
+      fill = `url(#${gid})`;
+    }
+    rib += `<path d="${ribbonPath(r)}" fill="${fill}"${r.op < 1 ? ` fill-opacity="${r.op}"` : ''}` +
+      `${r.bon && r.bw > 0 ? ` stroke="${r.bc}" stroke-width="${r.bw}" stroke-linejoin="round"` : ''} data-k="r" data-id="${r.id}"/>`;
+    lab += ribbonLabel(r, font);
+  }
+  for (const n of doc.nodes) {
+    nod += `<rect x="${r2(n.x)}" y="${r2(n.y)}" width="${r2(n.w)}" height="${r2(n.h)}"${n.rx ? ` rx="${n.rx}"` : ''} fill="${n.color}"` +
+      `${n.op < 1 ? ` fill-opacity="${n.op}"` : ''}${n.bon && n.bw > 0 ? ` stroke="${n.bc}" stroke-width="${n.bw}"` : ''} data-k="n" data-id="${n.id}"/>`;
+    lab += nodeLabel(n, font);
+  }
+  cv.innerHTML = `<g id="out">${defs ? `<defs>${defs}<\/defs>` : ''}${rib}${nod}${lab}<\/g><g id="ui">${overlay()}<\/g>`;
+  sync(); updateButtons();
+}
+const sch = () => { if (!raf) raf = requestAnimationFrame(draw); };
+
+function overlay() {
+  const k = scale(), r6 = 6 * k, S = selObjs(), B = '#4a7cff', sw = 1.5 * k; let h = '';
+  for (const s of S) {
+    const o = s.o;
+    h += s.k === 'n'
+      ? `<rect x="${o.x}" y="${o.y}" width="${o.w}" height="${o.h}" fill="none" stroke="${B}" stroke-width="${sw}" pointer-events="none"/>`
+      : `<path d="${ribbonPath(o)}" fill="none" stroke="${B}" stroke-width="${sw}" pointer-events="none"/>`;
+  }
+  if (S.length === 1 && !(drag && drag.m === 'move' && drag.moved)) {
+    const o = S[0].o;
+    if (S[0].k === 'n') {
+      h += `<circle cx="${o.x + o.w / 2}" cy="${o.y}" r="${r6}" fill="${B}" data-h="nt"/>` +
+        `<circle cx="${o.x + o.w / 2}" cy="${o.y + o.h}" r="${r6}" fill="${B}" data-h="nh"/>` +
+        `<circle cx="${o.x + o.w}" cy="${o.y + o.h - r6 * 2.5}" r="${r6}" fill="${B}" data-h="nw"/>` +
+        `<circle cx="${o.x + o.w}" cy="${o.y + o.h / 2}" r="${r6 * 1.5}" fill="#2fb36d" stroke="#fff" stroke-width="${k}" data-h="newr"/>`;
+    } else {
+      const [a, b, c, d] = ctrl(o), y0 = o.sy + o.w1 / 2, y3 = o.ty + o.w2 / 2, p1 = [o.sx + a, y0 + b], p2 = [o.tx + c, y3 + d];
+      const dia = (p, id) => `<rect x="${p[0] - r6}" y="${p[1] - r6}" width="${2 * r6}" height="${2 * r6}" transform="rotate(45 ${p[0]} ${p[1]})" fill="#9a6bff" stroke="#fff" stroke-width="${k}" data-h="${id}"/>`;
+      h += `<path d="M${o.sx},${y0}L${p1}M${o.tx},${y3}L${p2}" stroke="#9a6bff" stroke-width="${k}" stroke-dasharray="${4 * k} ${3 * k}" fill="none" pointer-events="none"/>` +
+        dia(p1, 'c1') + dia(p2, 'c2') +
+        `<rect x="${o.sx + 12 * k - r6}" y="${o.sy + o.w1 - r6}" width="${2 * r6}" height="${2 * r6}" fill="${B}" data-h="sw"/>` +
+        `<rect x="${o.tx - 12 * k - r6}" y="${o.ty + o.w2 - r6}" width="${2 * r6}" height="${2 * r6}" fill="${B}" data-h="ew"/>` +
+        `<circle cx="${o.sx}" cy="${y0}" r="${r6 * 1.4}" fill="#ff7a4a" stroke="#fff" stroke-width="${k}" data-h="sm"/>` +
+        `<circle cx="${o.tx}" cy="${y3}" r="${r6 * 1.4}" fill="#ff7a4a" stroke="#fff" stroke-width="${k}" data-h="em"/>`;
+    }
+  }
+  if (drag && drag.hint) h += `<line x1="${drag.hint.x}" y1="${drag.hint.y1}" x2="${drag.hint.x}" y2="${drag.hint.y2}" stroke="#ff7a4a" stroke-width="${3 * k}" pointer-events="none"/>`;
+  if (drag && drag.m === 'marquee')
+    h += `<rect x="${Math.min(drag.x, drag.x1)}" y="${Math.min(drag.y, drag.y1)}" width="${Math.abs(drag.x1 - drag.x)}" height="${Math.abs(drag.y1 - drag.y)}" fill="#4a7cff14" stroke="${B}" stroke-width="${k}" stroke-dasharray="${4 * k} ${3 * k}" pointer-events="none"/>`;
+  return h;
+}
+
+/* ==================================================================
+   View: zoom & pan
+   ================================================================== */
+function applyView(redraw) {
+  const cw = cv.clientWidth || 1200, ch = cv.clientHeight || 700;
+  view.h = view.w * ch / cw;
+  cv.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`);
+  const s = cw / view.w; let g = prefs.grid * 2; while (g * s < 12) g *= 2; while (g * s > 80 && g > 1) g /= 2;
+  cv.classList.toggle('nogrid', !prefs.showGrid);
+  cv.style.backgroundSize = `${g * s}px ${g * s}px`;
+  cv.style.backgroundPosition = `${-view.x * s}px ${-view.y * s}px`;
+  if (redraw) sch();
+}
+function zoomAt(x, y, f) {
+  const nw = Math.min(20000, Math.max(20, view.w * f)), s = nw / view.w;
+  view.x = x - (x - view.x) * s; view.y = y - (y - view.y) * s; view.w = nw; applyView(true);
+}
+function zoomBy(f) { zoomAt(view.x + view.w / 2, view.y + view.h / 2, f); }
+function fit() {
+  draw();
+  const g = cv.querySelector('#out'), b = g && g.getBBox();
+  if (!b || !(b.width || b.height)) { view = {x: 0, y: 0, w: 1200, h: 700}; return applyView(true); }
+  const cw = cv.clientWidth || 1200, ch = cv.clientHeight || 700, p = 40 * Math.max(b.width / cw, b.height / ch, .5);
+  view.w = Math.max(b.width + 2 * p, (b.height + 2 * p) * cw / ch); view.h = view.w * ch / cw;
+  view.x = b.x + b.width / 2 - view.w / 2; view.y = b.y + b.height / 2 - view.h / 2; applyView(true);
+}
+function status(x, y) { statusEl.textContent = `${Math.round(x)}, ${Math.round(y)}   ${Math.round(100 / scale())}%`; }
+
+/* ==================================================================
+   History (snapshot based). begin() before a change, commit() after.
+   ================================================================== */
+const snapshot = () => JSON.stringify(doc);
+function begin() { if (pending === null) pending = snapshot(); }
+function commit() {
+  if (pending === null) return;
+  const now = snapshot();
+  if (now !== pending) { hist.push(pending); if (hist.length > HIST_MAX) hist.shift(); redoS = []; autosave(); }
+  pending = null; updateButtons();
+}
+function restore(s) { doc = JSON.parse(s); sel = sel.filter(q => byId(q.k, q.id)); fixUid(); autosave(); buildPanel(); draw(); }
+function undo() { commit(); if (!hist.length) return toast('Nothing to undo'); redoS.push(snapshot()); restore(hist.pop()); }
+function redo() { commit(); if (!redoS.length) return toast('Nothing to redo'); hist.push(snapshot()); restore(redoS.pop()); }
+function act(fn) { begin(); fn(); commit(); buildPanel(); draw(); }
+function autosave() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(LS_DOC, snapshot()); } catch (e) {} }, 250); }
+function updateButtons() { $('#bUndo').disabled = !hist.length && pending === null; $('#bRedo').disabled = !redoS.length; }
+
+/* ==================================================================
+   Pointer interaction on the canvas
+   ================================================================== */
+function collectMove() {
+  const nodes = [], ends = new Map();
+  const mark = (r, end) => { let q = ends.get(r.id); if (!q) { q = {r, o: {sx: r.sx, sy: r.sy, tx: r.tx, ty: r.ty}, s: false, t: false}; ends.set(r.id, q); } q[end] = true; };
+  for (const s of selObjs()) {
+    if (s.k === 'r') { mark(s.o, 's'); mark(s.o, 't'); }
+    else { nodes.push({o: s.o, x: s.o.x, y: s.o.y}); for (const a of attached(s.o)) { if (a.s) mark(a.r, 's'); if (a.t) mark(a.r, 't'); } }
+  }
+  return {nodes, ends: [...ends.values()]};
+}
+function applyMove(c, dx, dy) {
+  for (const n of c.nodes) { n.o.x = n.x + dx; n.o.y = n.y + dy; }
+  for (const q of c.ends) { if (q.s) { q.r.sx = q.o.sx + dx; q.r.sy = q.o.sy + dy; } if (q.t) { q.r.tx = q.o.tx + dx; q.r.ty = q.o.ty + dy; } }
+}
+function moveDrag(base) {
+  begin(); const p = prim();
+  return {...base, m: 'move', c: collectMove(), ax: p ? (p.k === 'n' ? p.o.x : p.o.sx) : 0, ay: p ? (p.k === 'n' ? p.o.y : p.o.sy) : 0};
+}
+function startHandle(h, base) {
+  const p = prim(); if (!p) return; const o = p.o; begin();
+  if (h === 'newr') {                       // pull a new ribbon out of a node, stacked under existing ones
+    const outs = attached(o).filter(a => a.s).map(a => a.r), w = Math.min(40, o.h);
+    let sy = outs.length ? Math.max(...outs.map(r => r.sy + r.w1)) : o.y;
+    if (sy + w > o.y + o.h) sy = Math.round(o.y + o.h / 2 - w / 2);
+    const r = {...RIB_DEF, id: nextId(), sx: o.x + o.w, sy, tx: o.x + o.w, ty: sy, w1: w, w2: w, lockW: true};
+    doc.ribbons.push(r); sel = [{k: 'r', id: r.id}];
+    drag = {...base, m: 'em', o: {...r}, created: true, node: o.id}; return;
+  }
+  if ((h === 'c1' || h === 'c2') && o.cmode !== 'custom') {
+    const [a, b, c, d] = ctrl(o); Object.assign(o, {cmode: 'custom', c1x: r2(a), c1y: b, c2x: r2(c), c2y: d});
+  }
+  drag = {...base, m: h, o: {...o}, att: h === 'nw' ? attached(o).filter(a => a.s).map(a => ({r: a.r, sx: a.r.sx})) : []};
+}
+cv.addEventListener('pointerdown', e => {
+  const ae = document.activeElement; if (ae && ae !== document.body && ae.blur) ae.blur();   // commits pending panel edits
+  if (e.button === 2 || drag) return;
+  cv.setPointerCapture(e.pointerId);
+  const [x, y] = pt(e), base = {x, y, cx: e.clientX, cy: e.clientY, moved: false};
+  const pan = () => { drag = {...base, m: 'pan', vx: view.x, vy: view.y}; cv.classList.add('panning'); };
+  if (e.button === 1 || spaceDown) { e.preventDefault(); pan(); return; }
+  const t = e.target, h = t.dataset && t.dataset.h, dk = t.dataset && t.dataset.k;
+  if (h) startHandle(h, base);
+  else if (dk) {
+    const k = dk === 'ln' ? 'n' : dk === 'lr' ? 'r' : dk, id = +t.dataset.id;
+    if (e.shiftKey) {
+      if (isSel(k, id)) sel = sel.filter(s => !(s.k === k && s.id === id));
+      else { sel.push({k, id}); drag = moveDrag(base); }
+    } else {
+      const multi = isSel(k, id) && sel.length > 1;
+      sel = sel.filter(s => !(s.k === k && s.id === id)); if (!multi) sel = []; sel.push({k, id});
+      if ((dk === 'ln' || dk === 'lr') && !multi) { const o = byId(k, id); begin(); drag = {...base, m: 'label', o: {ldx: o.ldx, ldy: o.ldy}}; }
+      else { drag = moveDrag(base); drag.clickOnly = multi; }
+      if (e.detail === 2 && !multi) setTimeout(() => { const i = panel.querySelector('[data-f=label]'); if (i) { i.focus(); i.select(); } }, 0);
+    }
+  } else if (e.shiftKey) drag = {...base, m: 'marquee', x1: x, y1: y, base: [...sel]};
+  else { sel = []; pan(); }
+  buildPanel(); draw();
+});
+cv.addEventListener('pointermove', e => {
+  const [x, y] = pt(e); status(x, y);
+  if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy) > 3) drag.moved = true;
+  if (drag.m === 'pan') { const k = scale(); view.x = drag.vx - (e.clientX - drag.cx) * k; view.y = drag.vy - (e.clientY - drag.cy) * k; applyView(false); return; }
+  if (drag.m === 'marquee') { drag.x1 = x; drag.y1 = y; sch(); return; }
+  if (!drag.moved) return;
+  const dx = x - drag.x, dy = y - drag.y, o = drag.o, p = prim(), c = p && p.o;
+  if (!c) return;
+  drag.hint = null;
+  switch (drag.m) {
+    case 'move': applyMove(drag.c, sn(drag.ax + dx, e) - drag.ax, sn(drag.ay + dy, e) - drag.ay); break;
+    case 'label': c.ldx = Math.round(o.ldx + dx); c.ldy = Math.round(o.ldy + dy); break;
+    case 'nw': c.w = Math.max(1, sn(o.w + dx, e)); drag.att.forEach(q => q.r.sx = q.sx + c.w - o.w); break;
+    case 'nh': c.h = Math.max(1, sn(o.h + dy, e)); break;
+    case 'nt': { const b = o.y + o.h; c.y = Math.min(sn(o.y + dy, e), b - 1); c.h = b - c.y; break; }
+    case 'sm': case 'em': {
+      const s = drag.m === 'sm';
+      const [nx, ny, hint] = magnetEnd(c, s ? 's' : 't', sn((s ? o.sx : o.tx) + dx, e), sn((s ? o.sy : o.ty) + dy, e), e);
+      if (s) { c.sx = nx; c.sy = ny; } else { c.tx = nx; c.ty = ny; }
+      drag.hint = hint; break;
+    }
+    case 'sw': c.w1 = Math.max(0, sn(o.w1 + dy, e)); if (c.lockW) c.w2 = c.w1; break;
+    case 'ew': c.w2 = Math.max(0, sn(o.w2 + dy, e)); if (c.lockW) c.w1 = c.w2; break;
+    case 'c1': c.c1x = Math.round(o.c1x + dx); c.c1y = e.shiftKey ? 0 : Math.round(o.c1y + dy); break;
+    case 'c2': c.c2x = Math.round(o.c2x + dx); c.c2y = e.shiftKey ? 0 : Math.round(o.c2y + dy); break;
+  }
+  sch();
+});
+function endDrag() {
+  if (!drag) return;
+  const d = drag; drag = null; cv.classList.remove('panning');
+  if (d.m === 'marquee') {
+    const x0 = Math.min(d.x, d.x1), x1 = Math.max(d.x, d.x1), y0 = Math.min(d.y, d.y1), y1 = Math.max(d.y, d.y1);
+    sel = [...d.base];
+    cv.querySelectorAll('#out [data-k=n],#out [data-k=r]').forEach(el => {
+      const b = el.getBBox(), k = el.dataset.k, id = +el.dataset.id;
+      if (b.x <= x1 && b.x + b.width >= x0 && b.y <= y1 && b.y + b.height >= y0 && !isSel(k, id)) sel.push({k, id});
+    });
+  } else if (d.created && !d.moved) {        // a click on the green dot without dragging: drop the stub ribbon
+    doc.ribbons = doc.ribbons.filter(r => !isSel('r', r.id)); sel = [{k: 'n', id: d.node}];
+  } else if (d.clickOnly && !d.moved) sel = sel.slice(-1);
+  commit(); buildPanel(); draw();
+}
+function cancelDrag() {
+  if (!drag) return false;
+  if (pending !== null && drag.m !== 'pan' && drag.m !== 'marquee') { doc = JSON.parse(pending); pending = null; sel = sel.filter(q => byId(q.k, q.id)); }
+  if (drag.m === 'marquee') sel = drag.base;
+  drag = null; cv.classList.remove('panning'); buildPanel(); draw(); return true;
+}
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', endDrag);
+cv.addEventListener('lostpointercapture', endDrag);
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const [x, y] = pt(e), m = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  let dx = e.deltaX * m, dy = e.deltaY * m;
+  if (e.ctrlKey || e.metaKey) zoomAt(x, y, Math.exp(dy * .01));                     // trackpad pinch / Ctrl+wheel
+  else if (prefs.wheel === 'zoom' && !e.shiftKey) zoomAt(x, y, Math.exp(dy * .0015));
+  else { if (e.shiftKey && !dx) { dx = dy; dy = 0; } const k = scale(); view.x += dx * k; view.y += dy * k; applyView(true); }
+}, {passive: false});
+
+/* ==================================================================
+   Editing actions
+   ================================================================== */
+function addNode() { act(() => { const n = {...NODE_DEF, id: nextId(), x: sn(view.x + view.w / 2 - 12), y: sn(view.y + view.h / 2 - 50)}; doc.nodes.push(n); sel = [{k: 'n', id: n.id}]; }); }
+function addRibbon() {
+  act(() => {
+    const cx = view.x + view.w / 2, cy = view.y + view.h / 2;
+    const r = {...RIB_DEF, id: nextId(), sx: sn(cx - 200), sy: sn(cy - 60), tx: sn(cx + 200), ty: sn(cy + 20), lockW: true};
+    doc.ribbons.push(r); sel = [{k: 'r', id: r.id}];
+  });
+}
+function pasteObjs(items, off) {
+  const out = [];
+  for (const it of items) {
+    const o = {...clone(it.o), id: nextId()};
+    if (it.k === 'n') { o.x += off; o.y += off; } else { o.sx += off; o.tx += off; o.sy += off; o.ty += off; }
+    list(it.k).push(o); out.push({k: it.k, id: o.id});
+  }
+  return out;
+}
+function duplicate() { if (!sel.length) return; act(() => { sel = pasteObjs(selObjs().map(s => ({k: s.k, o: s.o})), 20); }); }
+function copySel() { if (!sel.length) return; clip = {items: selObjs().map(s => ({k: s.k, o: clone(s.o)})), n: 0}; toast(`Copied ${clip.items.length} item(s)`); }
+function paste() { if (!clip) return; clip.n++; act(() => { sel = pasteObjs(clip.items, 20 * clip.n); }); }
+function del() {
+  if (!sel.length) return;
+  act(() => { for (const s of sel) { if (s.k === 'n') doc.nodes = doc.nodes.filter(o => o.id !== s.id); else doc.ribbons = doc.ribbons.filter(o => o.id !== s.id); } sel = []; });
+}
+function selectAll() { sel = [...doc.ribbons.map(r => ({k: 'r', id: r.id})), ...doc.nodes.map(n => ({k: 'n', id: n.id}))]; buildPanel(); draw(); }
+function order(front) {
+  act(() => {
+    for (const k of ['n', 'r']) {
+      const L = list(k), ids = new Set(sel.filter(s => s.k === k).map(s => s.id));
+      const a = L.filter(o => ids.has(o.id)), b = L.filter(o => !ids.has(o.id));
+      L.splice(0, L.length, ...(front ? [...b, ...a] : [...a, ...b]));
+    }
+  });
+}
+function nudge(dx, dy) { act(() => applyMove(collectMove(), dx, dy)); }
+function moveNodeTo(n, x, y) {
+  const at = attached(n), dx = x - n.x, dy = y - n.y; n.x = x; n.y = y;
+  for (const a of at) { if (a.s) { a.r.sx += dx; a.r.sy += dy; } if (a.t) { a.r.tx += dx; a.r.ty += dy; } }
+}
+function align(mode) {
+  const N = selNodes(); if (N.length < 2) return toast('Select two or more nodes first');
+  act(() => {
+    const L = Math.min(...N.map(n => n.x)), R = Math.max(...N.map(n => n.x + n.w)), T = Math.min(...N.map(n => n.y)), B = Math.max(...N.map(n => n.y + n.h));
+    if (mode === 'dv' || mode === 'dh') {
+      const v = mode === 'dv', S = [...N].sort((a, b) => v ? a.y - b.y : a.x - b.x);
+      const total = S.reduce((s, n) => s + (v ? n.h : n.w), 0), gap = ((v ? B - T : R - L) - total) / (S.length - 1);
+      let p = v ? T : L;
+      for (const n of S) { v ? moveNodeTo(n, n.x, Math.round(p)) : moveNodeTo(n, Math.round(p), n.y); p += (v ? n.h : n.w) + gap; }
+      return;
+    }
+    for (const n of N) {
+      if (mode === 'l') moveNodeTo(n, L, n.y); else if (mode === 'r') moveNodeTo(n, R - n.w, n.y);
+      else if (mode === 'cx') moveNodeTo(n, Math.round((L + R) / 2 - n.w / 2), n.y);
+      else if (mode === 't') moveNodeTo(n, n.x, T); else if (mode === 'b') moveNodeTo(n, n.x, B - n.h);
+      else if (mode === 'cy') moveNodeTo(n, n.x, Math.round((T + B) / 2 - n.h / 2));
+    }
+  });
+}
+function matchSize(f) {
+  const p = prim(), N = selNodes(); if (!p || p.k !== 'n' || N.length < 2) return toast('Select two or more nodes first');
+  act(() => N.forEach(n => {
+    if (f === 'w') { const at = attached(n).filter(a => a.s), dw = p.o.w - n.w; n.w = p.o.w; at.forEach(a => a.r.sx += dw); } else n.h = p.o.h;
+  }));
+}
+// Stack the ribbons on each side of a node top-to-bottom, ordered by where their other end is (fewest crossings).
+function stackNode(n) {
+  const at = attached(n);
+  const outs = at.filter(a => a.s).map(a => a.r).sort((p, q) => (p.ty + p.w2 / 2) - (q.ty + q.w2 / 2) || p.id - q.id);
+  const ins = at.filter(a => a.t).map(a => a.r).sort((p, q) => (p.sy + p.w1 / 2) - (q.sy + q.w1 / 2) || p.id - q.id);
+  let y = n.y; for (const r of outs) { r.sy = y; y += r.w1; }
+  y = n.y; for (const r of ins) { r.ty = y; y += r.w2; }
+}
+function fitHeight(n) {
+  const at = attached(n);
+  const so = at.filter(a => a.s).reduce((s, a) => s + a.r.w1, 0), si = at.filter(a => a.t).reduce((s, a) => s + a.r.w2, 0);
+  if (so || si) n.h = Math.max(1, so, si);
+}
+function stackSel(all) {
+  const N = all ? doc.nodes : selNodes(); if (!N.length) return toast('No nodes to stack');
+  act(() => { for (let i = 0; i < 2; i++) N.forEach(stackNode); });
+}
+function fitSel() { const N = selNodes(); act(() => N.forEach(n => { fitHeight(n); stackNode(n); })); }
+function resetCurve() { const p = prim(); if (p && p.k === 'r') act(() => { p.o.cmode = 'auto'; }); }
+function newDoc() {
+  if ((doc.nodes.length || doc.ribbons.length) && !confirm('Start a new, empty project? (You can still undo this.)')) return;
+  act(() => { const name = doc.settings.name; doc = emptyDoc(); doc.settings.name = name; sel = []; });
+  view = {x: 0, y: 0, w: 1200, h: 700}; applyView(true);
+}
+
+/* ==================================================================
+   Properties panel
+   ================================================================== */
+const sc = s => s ? ` data-scope="${s}"` : '';
+const F = {
+  area: (f, l) => `<div class="row top"><label>${l}<\/label><textarea rows="2" data-f="${f}" placeholder="Enter = new line"><\/textarea><\/div>`,
+  text: (f, l, s, extra = '') => `<div class="row"><label>${l}<\/label><input type="text" data-f="${f}"${sc(s)}${extra}><\/div>`,
+  num: (f, l, step = 1, s) => `<div class="row"><label>${l}<\/label><input type="number" data-t="num" step="${step}" data-f="${f}"${sc(s)}><\/div>`,
+  pair: (f1, f2, l, step = 1) => `<div class="row"><label>${l}<\/label><input type="number" data-t="num" step="${step}" data-f="${f1}" title="${f1}"><input type="number" data-t="num" step="${step}" data-f="${f2}" title="${f2}"><\/div>`,
+  range: (f, l, min, max, step) => `<div class="row"><label>${l}<\/label><input type="range" data-t="num" min="${min}" max="${max}" step="${step}" data-f="${f}"><input type="number" data-t="num" step="${step}" data-f="${f}"><\/div>`,
+  color: (f, l) => `<div class="row"><label>${l}<\/label><input type="color" data-f="${f}"><\/div>`,
+  check: (f, l, s) => `<div class="row"><label>${l}<\/label><input type="checkbox" data-f="${f}"${sc(s)}><\/div>`,
+  select: (f, l, opts, s) => `<div class="row"><label>${l}<\/label><select data-f="${f}"${sc(s)}>${opts.map(([v, t]) => `<option value="${escA(v)}">${esc(t)}<\/option>`).join('')}<\/select><\/div>`,
+  border: () => `<div class="row"><label>Border<\/label><input type="checkbox" data-f="bon"><input type="color" data-f="bc"><\/div>` + F.range('bw', 'Border width', 0, 10, .25),
+  btns: b => `<div class="btns">${b.map(([a, t, tip]) => `<button data-act="${a}"${tip ? ` title="${escA(tip)}"` : ''}>${t}<\/button>`).join('')}<\/div>`,
+};
+const ARRANGE = F.btns([['front', 'To front'], ['back', 'To back'], ['duplicate', 'Duplicate'], ['del', 'Delete']]);
+
+function buildPanel() {
+  const S = selObjs(); let h;
+  if (!S.length) {
+    h = `<h3>Project<\/h3>` + F.text('name', 'Name', 'doc', ' title="Used for exported file names"') +
+      F.text('font', 'Font', 'doc', ' list="fontList"') +
+      `<p class="hint">Font for all labels. Pick a listed one or type any installed font (e.g. Times for LaTeX papers).<\/p>` +
+      `<h4>Export<\/h4>` + F.select('bg', 'Background', [['none', 'Transparent'], ['#ffffff', 'White']], 'doc') + F.num('pad', 'Padding', 1, 'doc') +
+      `<h4>Editor<\/h4>` + F.check('snap', 'Snap to grid', 'pref') + F.num('grid', 'Grid size', 1, 'pref') + F.check('showGrid', 'Show grid', 'pref') +
+      F.select('wheel', 'Mouse wheel', [['zoom', 'Zooms'], ['pan', 'Pans (trackpad)']], 'pref') +
+      `<h4>Layout<\/h4>` + F.btns([['stackAll', 'Stack all ribbons', 'Stack the ribbons on every node, ordered to reduce crossings'], ['fit', 'Fit view']]) +
+      `<p class="hint">${doc.nodes.length} node(s), ${doc.ribbons.length} ribbon(s). Click something to edit it.<\/p>`;
+  } else if (S.length > 1) {
+    const nn = S.filter(s => s.k === 'n').length;
+    h = `<h3>${S.length} selected<\/h3><p class="hint">${nn} node(s), ${S.length - nn} ribbon(s). Changes apply to all of them.<\/p>` +
+      F.color('color', 'Fill') + F.range('op', 'Opacity', 0, 1, .01) + F.border() +
+      (nn >= 2 ? `<h4>Align nodes<\/h4>` + F.btns([['al:l', 'Left'], ['al:cx', 'Center'], ['al:r', 'Right'], ['al:t', 'Top'], ['al:cy', 'Middle'], ['al:b', 'Bottom']]) +
+        F.btns([['al:dv', 'Distribute ↕'], ['al:dh', 'Distribute ↔'], ['ms:w', 'Same width'], ['ms:h', 'Same height']]) +
+        `<p class="hint">"Same width/height" copies the last-clicked node.<\/p>` : '') +
+      (nn ? `<h4>Ribbons<\/h4>` + F.btns([['stack', 'Stack ribbons'], ['fitH', 'Fit height to ribbons']]) : '') +
+      `<h4>Arrange<\/h4>` + ARRANGE;
+  } else if (S[0].k === 'n') {
+    h = `<h3>Node<\/h3>` + F.area('label', 'Label') +
+      F.select('lpos', 'Label at', LPOS.map(v => [v, v[0].toUpperCase() + v.slice(1)])) + F.range('fs', 'Font size', 6, 48, 1) +
+      F.color('fc', 'Label color') + F.check('bold', 'Bold') + F.pair('ldx', 'ldy', 'Label offset') +
+      `<h4>Geometry<\/h4>` + F.pair('x', 'y', 'Position') + F.range('w', 'Width', 1, 300, 1) + F.range('h', 'Height', 1, 1000, 1) + F.range('rx', 'Corner radius', 0, 30, .5) +
+      `<h4>Style<\/h4>` + F.color('color', 'Fill') + F.range('op', 'Opacity', 0, 1, .01) + F.border() +
+      `<h4>Ribbons<\/h4>` + F.btns([['stack', 'Stack ribbons', 'Pack ribbons on both sides from the top, ordered to reduce crossings'], ['fitH', 'Fit height to ribbons']]) +
+      `<h4>Arrange<\/h4>` + ARRANGE;
+  } else {
+    const r = S[0].o;
+    h = `<h3>Ribbon<\/h3>` + F.range('w1', 'Width start', 0, 600, 1) + F.range('w2', 'Width end', 0, 600, 1) + F.check('lockW', 'Equal widths') +
+      `<h4>Curve<\/h4>` + (r.cmode === 'custom'
+        ? F.pair('c1x', 'c1y', 'Start handle') + F.pair('c2x', 'c2y', 'End handle') + F.btns([['resetCurve', 'Reset to smooth curve']])
+        : F.range('curv', 'Curviness', 0, 1, .01) + `<p class="hint">Drag the purple diamonds on the canvas for a fully free curve.<\/p>`) +
+      F.pair('sx', 'sy', 'Start') + F.pair('tx', 'ty', 'End') +
+      `<h4>Style<\/h4>` + F.color('color', 'Fill') + F.check('grad', 'Gradient') + F.color('color2', 'End color') + F.range('op', 'Opacity', 0, 1, .01) + F.border() +
+      `<h4>Label<\/h4>` + F.area('label', 'Text') + F.range('fs', 'Font size', 6, 48, 1) + F.color('fc', 'Color') + F.check('bold', 'Bold') + F.pair('ldx', 'ldy', 'Offset') +
+      `<h4>Arrange<\/h4>` + ARRANGE;
+  }
+  panel.innerHTML = h; sync();
+}
+function sync() {
+  const p = prim(), o = p && p.o;
+  panel.querySelectorAll('[data-f]').forEach(i => {
+    const s = i.dataset.scope, src = s === 'doc' ? doc.settings : s === 'pref' ? prefs : o, f = i.dataset.f;
+    if (!src || !(f in src)) return;
+    const v = src[f];
+    if (i.type === 'checkbox') i.checked = !!v;
+    else if (i !== document.activeElement || i.type === 'range') i.value = i.type === 'color' ? hex(v) : typeof v === 'number' ? r2(v) : v;
+  });
+}
+function setField(s, f, v) {
+  const o = s.o; if (!(f in o)) return;
+  if (s.k === 'n' && (f === 'x' || f === 'y' || f === 'w')) {           // keep attached ribbons glued to the node
+    const at = attached(o), dx = f === 'x' ? v - o.x : 0, dy = f === 'y' ? v - o.y : 0, dw = f === 'w' ? v - o.w : 0;
+    o[f] = v; for (const a of at) { if (a.s) { a.r.sx += dx + dw; a.r.sy += dy; } if (a.t) { a.r.tx += dx; a.r.ty += dy; } }
+    return;
+  }
+  if (s.k === 'r' && o.lockW && (f === 'w1' || f === 'w2')) { o.w1 = o.w2 = v; return; }
+  if (s.k === 'r' && f === 'lockW' && v) o.w2 = o.w1;
+  if ((f === 'w' || f === 'h') && v < 1) v = 1;
+  o[f] = v;
+}
+panel.addEventListener('input', e => {
+  const i = e.target, f = i.dataset.f; if (!f) return;
+  let v = i.type === 'checkbox' ? i.checked : i.value;
+  if (i.dataset.t === 'num') { if (v === '' || v === '-' || !Number.isFinite(+v)) return; v = +v; }
+  const s = i.dataset.scope;
+  if (s === 'pref') { prefs[f] = f === 'grid' ? Math.max(1, v) : v; savePrefs(); applyView(true); return; }
+  begin();
+  if (s === 'doc') { if (f === 'pad') v = Math.max(0, v); doc.settings[f] = v; }
+  else for (const q of selObjs()) setField(q, f, v);
+  panel.querySelectorAll(`[data-f="${f}"]`).forEach(j => { if (j !== i && j.type !== 'checkbox') j.value = i.value; });
+  sch();
+});
+panel.addEventListener('change', commit);
+panel.addEventListener('focusout', () => setTimeout(commit));
+
+/* ==================================================================
+   Export
+   ================================================================== */
+function svgExport() {
+  draw();
+  const g = cv.querySelector('#out');
+  if (!doc.nodes.length && !doc.ribbons.length) { toast('Nothing to export yet'); return null; }
+  const b = g.getBBox(), p = doc.settings.pad;
+  const x = r2(b.x - p), y = r2(b.y - p), w = r2(b.width + 2 * p), h = r2(b.height + 2 * p);
+  const NS = 'http://www.w3.org/2000/svg', root = document.createElementNS(NS, 'svg');
+  root.setAttribute('viewBox', `${x} ${y} ${w} ${h}`); root.setAttribute('width', w); root.setAttribute('height', h);
+  if (doc.settings.bg !== 'none') {
+    const bg = document.createElementNS(NS, 'rect');
+    [['x', x], ['y', y], ['width', w], ['height', h], ['fill', doc.settings.bg]].forEach(([k, v]) => bg.setAttribute(k, v));
+    root.appendChild(bg);
+  }
+  const c = g.cloneNode(true);
+  [c, ...c.querySelectorAll('*')].forEach(el => [...el.attributes].forEach(a => {
+    if (a.name.startsWith('data-') || a.name === 'id' && el === c || a.name === 'style' || a.name === 'class') el.removeAttribute(a.name);
+  }));
+  while (c.firstChild) root.appendChild(c.firstChild);
+  return {svg: new XMLSerializer().serializeToString(root), w, h};
+}
+function exportSVG() { const r = svgExport(); if (r) download(new Blob([r.svg], {type: 'image/svg+xml'}), fileName('svg')); }
+function exportPNG() {
+  const r = svgExport(); if (!r) return;
+  const k = +prefs.pngScale || 4, img = new Image(), url = URL.createObjectURL(new Blob([r.svg], {type: 'image/svg+xml'}));
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = Math.ceil(r.w * k); c.height = Math.ceil(r.h * k);
+    const x = c.getContext('2d'); x.scale(k, k); x.drawImage(img, 0, 0, r.w, r.h); URL.revokeObjectURL(url);
+    c.toBlob(b => b ? download(b, fileName('png')) : toast('PNG export failed (image too large?)'));
+  };
+  img.onerror = () => toast('PNG export failed');
+  img.src = url;
+}
+function exportPDF() {
+  const r = svgExport(); if (!r) return;
+  const win = open('', '_blank');
+  if (!win) return toast('Pop-up blocked. Allow pop-ups for this page, or export SVG instead.');
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(fileName('pdf'))}<\/title><style>` +
+    `@page{size:${r.w}px ${r.h}px;margin:0}html,body{margin:0;padding:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}` +
+    `svg{display:block;width:${r.w}px;height:${r.h}px}<\/style><\/head><body>${r.svg}` +
+    `<script>onload=()=>setTimeout(()=>print(),250)<\/script><\/body><\/html>`);
+  win.document.close();
+  toast('In the print dialog choose "Save as PDF" (margins: none). The PDF stays fully vector.', 6000);
+}
+async function copySVG() {
+  const r = svgExport(); if (!r) return;
+  try { await navigator.clipboard.writeText(r.svg); toast('SVG copied to the clipboard'); }
+  catch (e) { toast('Clipboard not available here; use Export SVG instead'); }
+}
+
+/* ==================================================================
+   Project files & persistence
+   ================================================================== */
+function saveProject() { commit(); download(new Blob([JSON.stringify(doc, null, 1)], {type: 'application/json'}), fileName('json').replace(/\.json$/, `_${stamp()}.json`)); }
+function loadText(text, name) {
+  let nd; try { nd = normalize(JSON.parse(text)); } catch (e) { return toast('Could not open ' + (name || 'file') + ': ' + e.message, 5000); }
+  if (drag) cancelDrag();
+  commit(); begin(); doc = nd; sel = []; commit(); fixUid(); buildPanel(); fit(); toast(`Opened ${name || 'project'}`);
+}
+fileIn.addEventListener('change', () => { const f = fileIn.files[0]; if (f) f.text().then(t => loadText(t, f.name)); fileIn.value = ''; });
+const dropEl = $('#drop'); let dragDepth = 0;
+addEventListener('dragenter', e => { if ([...(e.dataTransfer.types || [])].includes('Files')) { dragDepth++; dropEl.classList.add('on'); } });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dropEl.classList.remove('on'); } });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; dropEl.classList.remove('on');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) f.text().then(t => loadText(t, f.name));
+});
+function savePrefs() { try { localStorage.setItem(LS_PREF, JSON.stringify(prefs)); } catch (e) {} }
+function loadPrefs() {
+  prefs = {...PREF_DEF}; try { Object.assign(prefs, JSON.parse(localStorage.getItem(LS_PREF) || '{}')); } catch (e) {}
+  prefs.grid = Math.max(1, +prefs.grid || 10);
+}
+addEventListener('beforeunload', () => { commit(); try { localStorage.setItem(LS_DOC, snapshot()); } catch (e) {} });
+
+/* ==================================================================
+   Buttons & keyboard
+   ================================================================== */
+const ACTIONS = {
+  addNode, addRibbon, undo, redo, duplicate, del, front: () => order(true), back: () => order(false),
+  zoomIn: () => zoomBy(.8), zoomOut: () => zoomBy(1.25), fit, newDoc, open: () => fileIn.click(), save: saveProject,
+  exportSVG, exportPNG, exportPDF, copySVG, stack: () => stackSel(false), stackAll: () => stackSel(true), fitH: fitSel, resetCurve,
+};
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act; b.blur(); commit();
+  if (a.startsWith('al:')) align(a.slice(3)); else if (a.startsWith('ms:')) matchSize(a.slice(3)); else if (ACTIONS[a]) ACTIONS[a]();
+});
+const pngSel = $('#pngScale');
+pngSel.addEventListener('change', () => { prefs.pngScale = +pngSel.value; savePrefs(); pngSel.blur(); });
+
+addEventListener('keydown', e => {
+  const t = e.target, tag = t.tagName, mod = e.ctrlKey || e.metaKey, key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const textish = tag === 'TEXTAREA' || tag === 'INPUT' && ['text', 'number', 'search'].includes(t.type);
+  const control = textish || tag === 'SELECT' || tag === 'INPUT' && t.type === 'range';
+  if (key === 'Escape') { if (control) { t.blur(); return; } if (!cancelDrag()) { sel = []; buildPanel(); draw(); } return; }
+  if (mod) {
+    if (textish) return;                             // native undo / copy / paste inside text fields
+    const f = {z: () => e.shiftKey ? redo() : undo(), y: redo, d: duplicate, c: copySel, x: () => { copySel(); del(); }, v: paste, a: selectAll, s: saveProject}[key];
+    if (f) { e.preventDefault(); if (!drag) f(); }
+    return;
+  }
+  if (control || drag && key !== ' ') return;
+  if (key === ' ') { e.preventDefault(); spaceDown = true; cv.classList.add('space'); }
+  else if (key === 'Delete' || key === 'Backspace') { e.preventDefault(); del(); }
+  else if (key === '+' || key === '=') zoomBy(.8);
+  else if (key === '-' || key === '_') zoomBy(1.25);
+  else if (key === '0') fit();
+  else if (key === 'n') addNode();
+  else if (key === 'r') addRibbon();
+  else if (key === '?') { const d = $('#help'); d.open = !d.open; }
+  else if (sel.length && key.startsWith('Arrow')) {
+    e.preventDefault(); const s = e.shiftKey ? 10 : 1;
+    nudge(key === 'ArrowLeft' ? -s : key === 'ArrowRight' ? s : 0, key === 'ArrowUp' ? -s : key === 'ArrowDown' ? s : 0);
+  }
+});
+addEventListener('keyup', e => { if (e.key === ' ') { spaceDown = false; cv.classList.remove('space'); } });
+addEventListener('blur', () => { spaceDown = false; cv.classList.remove('space'); });
+addEventListener('resize', () => applyView(true));
+
+/* ==================================================================
+   Start-up
+   ================================================================== */
+$('#fontList').innerHTML = FONTS.map(f => `<option value="${escA(f)}">`).join('');
+loadPrefs(); pngSel.value = String(prefs.pngScale);
+try { const s = localStorage.getItem(LS_DOC); doc = s ? normalize(JSON.parse(s)) : demoDoc(); }
+catch (e) { doc = demoDoc(); }
+fixUid(); applyView(false); buildPanel(); fit();
+</script>
+</body>
+</html>

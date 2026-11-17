@@ -1,0 +1,157 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ribbon editor</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:13px Arial,sans-serif;background:#f4f4f6;color:#222;overflow:hidden}
+#app{display:flex;height:100vh}
+#cv{flex:1;min-width:0;background-color:#fff;background-image:radial-gradient(#ddd 1.2px,transparent 1.2px);background-size:20px 20px;touch-action:none;user-select:none}
+aside{width:290px;padding:10px;overflow:auto;background:#fff;border-left:1px solid #ddd}
+button,input[type=text]{font:inherit;padding:5px 8px;margin:2px 2px 2px 0;cursor:pointer}
+.row{display:flex;align-items:center;gap:6px;margin:5px 0}.row label{width:74px;color:#555}
+.row input[type=range]{flex:1;min-width:0}.row input[type=number]{width:60px}.row input[type=text]{flex:1;min-width:0}
+h4{margin:12px 0 4px}small{color:#777;line-height:1.4;display:block;margin-top:6px}
+</style></head><body>
+<div id="app"><svg id="cv" viewBox="0 0 1200 700"></svg>
+<aside>
+<button onclick="addNode()">+ Node</button><button onclick="addRibbon()">+ Ribbon</button><button onclick="dup()">Duplicate</button><button onclick="del()">Delete</button><br>
+<button onclick="undo()">Undo</button><button onclick="redo()">Redo</button>
+<button onclick="zoomBy(.8)" title="Zoom in (+)">Zoom +</button><button onclick="zoomBy(1.25)" title="Zoom out (-)">Zoom −</button><button onclick="fit()" title="Fit (0)">Fit</button>
+<label><input type="checkbox" id="snap"> snap 10px</label><br>
+<button onclick="dl('svg')">Export SVG</button><button onclick="dl('png')">PNG 4x</button><button onclick="cp()">Copy SVG</button><br>
+<button onclick="saveJ()">Save project</button><button onclick="lf.click()">Load project</button><input type="file" id="lf" hidden accept=".json">
+<div id="pn"></div>
+<small><b>Drag &amp; drop:</b><br>• Drag any node or ribbon to move it. Ribbons touching a node move with it.<br>
+• Select a node: green dot = drag out a new ribbon; blue dots = resize.<br>
+• Select a ribbon: big dots move each end (they magnet to node edges; hold Alt to disable), squares change width.<br>
+• Mouse wheel = zoom at cursor. Drag empty canvas (or hold Space / middle mouse) = pan. Keys: + / − zoom, 0 = fit.<br>
+• Arrows nudge (Shift = 10), Ctrl+D duplicate, Del delete, Ctrl+Z / Ctrl+Y undo / redo.</small>
+</aside></div>
+<script>
+const cv=document.getElementById('cv'),pn=document.getElementById('pn'),snapEl=document.getElementById('snap');
+let S={nodes:[{id:1,label:'Input',x:60,y:50,w:24,h:300,color:'#a8dcc4'}],
+ ribbons:[{id:2,sx:84,sy:80,tx:640,ty:400,w1:110,w2:110,curv:.5,color:'#dcdce3',op:1}]};
+let sel=null,d=null,uid=10,hist=[],redoS=[],pre=null,raf=0,spaceDown=false,view={x:0,y:0,w:1200,h:700};
+const N=id=>S.nodes.find(n=>n.id==id),R=id=>S.ribbons.find(r=>r.id==id),cur=()=>sel&&(sel.k=='n'?N(sel.id):R(sel.id));
+const rp=r=>{const c=(r.tx-r.sx)*r.curv;return`M${r.sx},${r.sy}C${r.sx+c},${r.sy} ${r.tx-c},${r.ty} ${r.tx},${r.ty}L${r.tx},${r.ty+r.w2}C${r.tx-c},${r.ty+r.w2} ${r.sx+c},${r.sy+r.w1} ${r.sx},${r.sy+r.w1}Z`};
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const sch=()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;draw()})};
+function draw(){
+ const k=view.w/cv.clientWidth||1,r6=6*k;let h='<g id="out">';
+ S.ribbons.forEach(r=>h+=`<path d="${rp(r)}" fill="${r.color}" fill-opacity="${r.op}" ${(r.bon??false)?`stroke="${r.bc||'#888888'}" stroke-width="${r.bw??1}" stroke-linejoin="round"`:''} data-k="r" data-id="${r.id}" style="cursor:move"/>`);
+ S.nodes.forEach(n=>{h+=`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="${n.color}" ${(n.bon??true)?`stroke="${n.bc||'#333333'}" stroke-width="${n.bw??.8}"`:''} data-k="n" data-id="${n.id}" style="cursor:move"/>`;
+  if(n.label)h+=`<text x="${n.x+n.w+6}" y="${n.y+n.h/2+4}" font-family="Arial,Helvetica,sans-serif" font-size="14" fill="#222" pointer-events="none">${esc(n.label)}</text>`});
+ h+='</g>';
+ if(sel&&sel.k=='n'&&N(sel.id)){const n=N(sel.id);
+  h+=`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="none" stroke="#4a7cff" stroke-width="${1.5*k}" pointer-events="none"/>
+  <circle cx="${n.x+n.w}" cy="${n.y+n.h/2}" r="${r6*1.5}" fill="#2fb36d" stroke="#fff" stroke-width="${k}" data-h="nl" style="cursor:crosshair"/>
+  <circle cx="${n.x+n.w}" cy="${n.y+n.h-r6*2}" r="${r6}" fill="#4a7cff" data-h="nw" style="cursor:ew-resize"/>
+  <circle cx="${n.x+n.w/2}" cy="${n.y+n.h}" r="${r6}" fill="#4a7cff" data-h="nh" style="cursor:ns-resize"/>
+  <circle cx="${n.x+n.w/2}" cy="${n.y}" r="${r6}" fill="#4a7cff" data-h="nt" style="cursor:ns-resize"/>`}
+ if(sel&&sel.k=='r'&&R(sel.id)){const r=R(sel.id);
+  h+=`<path d="${rp(r)}" fill="none" stroke="#4a7cff" stroke-width="${1.5*k}" pointer-events="none"/>
+  <rect x="${r.sx+12*k-r6}" y="${r.sy+r.w1-r6}" width="${2*r6}" height="${2*r6}" fill="#4a7cff" data-h="sw" style="cursor:ns-resize"/>
+  <rect x="${r.tx-12*k-r6}" y="${r.ty+r.w2-r6}" width="${2*r6}" height="${2*r6}" fill="#4a7cff" data-h="ew" style="cursor:ns-resize"/>
+  <circle cx="${r.sx}" cy="${r.sy+r.w1/2}" r="${r6*1.4}" fill="#ff7a4a" stroke="#fff" stroke-width="${k}" data-h="sm" style="cursor:move"/>
+  <circle cx="${r.tx}" cy="${r.ty+r.w2/2}" r="${r6*1.4}" fill="#ff7a4a" stroke="#fff" stroke-width="${k}" data-h="em" style="cursor:move"/>`}
+ cv.innerHTML=h}
+function pt(e){const p=new DOMPoint(e.clientX,e.clientY).matrixTransform(cv.getScreenCTM().inverse());return[p.x,p.y]}
+const sn=(v,e)=>snapEl.checked&&!(e&&e.altKey)?Math.round(v/10)*10:Math.round(v);
+function attached(n){const a=[];S.ribbons.forEach(r=>{
+ if(Math.abs(r.sx-(n.x+n.w))<2&&r.sy+r.w1/2>=n.y-2&&r.sy+r.w1/2<=n.y+n.h+2)a.push({r,s:1,o:{...r}});
+ if(Math.abs(r.tx-n.x)<2&&r.ty+r.w2/2>=n.y-2&&r.ty+r.w2/2<=n.y+n.h+2)a.push({r,s:0,o:{...r}})});return a}
+function magnet(v,edge,e){if(e.altKey)return v;for(const n of S.nodes){const x=edge=='s'?n.x+n.w:n.x;if(Math.abs(v-x)<12)return x}return v}
+cv.addEventListener('pointerdown',e=>{
+ if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();
+ if(e.button==1||spaceDown){e.preventDefault();d={m:'pan',cx:e.clientX,cy:e.clientY,vx:view.x,vy:view.y};cv.setPointerCapture(e.pointerId);return}
+ const t=e.target,[x,y]=pt(e);let m=t.dataset.h;
+ if(m=='nl'){const n=N(sel.id),w=Math.min(40,n.h),r={id:++uid,sx:n.x+n.w,sy:Math.round(n.y+n.h/2-w/2),tx:n.x+n.w+2,ty:Math.round(n.y+n.h/2-w/2),w1:w,w2:w,curv:.5,color:'#dcdce3',op:1};
+  S.ribbons.push(r);sel={k:'r',id:r.id};m='em';buildPanel()}
+ if(m){const o=cur();d={m,x,y,o:{...o},att:m=='nw'?attached(o).filter(a=>a.s):[]}}
+ else if(t.dataset.k){sel={k:t.dataset.k,id:+t.dataset.id};const o=cur();d={m:sel.k=='n'?'nm':'rm',x,y,o:{...o},att:sel.k=='n'?attached(o):[]};buildPanel()}
+ else{sel=null;buildPanel();d={m:'pan',cx:e.clientX,cy:e.clientY,vx:view.x,vy:view.y}}
+ if(d)cv.setPointerCapture(e.pointerId);draw()});
+cv.addEventListener('pointermove',e=>{if(!d)return;
+ if(d.m=='pan'){const k=view.w/cv.clientWidth;view.x=d.vx-(e.clientX-d.cx)*k;view.y=d.vy-(e.clientY-d.cy)*k;applyView(false);return}
+ const[x,y]=pt(e),dx=x-d.x,dy=y-d.y,o=d.o,c=cur(),m=d.m;
+ if(m=='nm'){c.x=sn(o.x+dx,e);c.y=sn(o.y+dy,e);const a=c.x-o.x,b=c.y-o.y;
+  d.att.forEach(q=>{if(q.s){q.r.sx=q.o.sx+a;q.r.sy=q.o.sy+b}else{q.r.tx=q.o.tx+a;q.r.ty=q.o.ty+b}})}
+ else if(m=='nw'){c.w=Math.max(2,sn(o.w+dx,e));d.att.forEach(q=>q.r.sx=q.o.sx+c.w-o.w)}
+ else if(m=='nh')c.h=Math.max(2,sn(o.h+dy,e));
+ else if(m=='nt'){const b=o.y+o.h;c.y=Math.min(sn(o.y+dy,e),b-2);c.h=b-c.y}
+ else if(m=='rm'){const a=sn(o.sx+dx,e)-o.sx,b=sn(o.sy+dy,e)-o.sy;c.sx=o.sx+a;c.tx=o.tx+a;c.sy=o.sy+b;c.ty=o.ty+b}
+ else if(m=='sm'){c.sx=magnet(sn(o.sx+dx,e),'s',e);c.sy=sn(o.sy+dy,e)}
+ else if(m=='em'){c.tx=magnet(sn(o.tx+dx,e),'t',e);c.ty=sn(o.ty+dy,e)}
+ else if(m=='sw')c.w1=Math.max(0,sn(o.w1+dy,e));
+ else if(m=='ew')c.w2=Math.max(0,sn(o.w2+dy,e));
+ sync();sch()});
+cv.addEventListener('pointerup',()=>d=null);
+/* undo / redo */
+document.addEventListener('pointerdown',()=>pre=JSON.stringify(S),true);
+function commit(){if(pre&&pre!==JSON.stringify(S)){hist.push(pre);if(hist.length>150)hist.shift();redoS=[]}pre=null}
+document.addEventListener('pointerup',()=>setTimeout(commit));document.addEventListener('change',commit);
+function act(f){pre=JSON.stringify(S);f();commit();draw();buildPanel()}
+function load(s){S=JSON.parse(s);if(sel&&!cur())sel=null;draw();buildPanel()}
+function undo(){if(!hist.length)return;redoS.push(JSON.stringify(S));load(hist.pop())}
+function redo(){if(!redoS.length)return;hist.push(JSON.stringify(S));load(redoS.pop())}
+/* actions */
+function addNode(){act(()=>{const n={id:++uid,label:'Node',x:400,y:250,w:24,h:100,color:'#b3b3b3'};S.nodes.push(n);sel={k:'n',id:n.id}})}
+function addRibbon(){act(()=>{const r={id:++uid,sx:300,sy:200,tx:800,ty:380,w1:60,w2:60,curv:.5,color:'#dcdce3',op:1};S.ribbons.push(r);sel={k:'r',id:r.id}})}
+function dup(){if(!sel)return;act(()=>{const c={...cur(),id:++uid};if(sel.k=='n'){c.x+=20;c.y+=20;S.nodes.push(c)}else{c.sy+=20;c.ty+=20;S.ribbons.push(c)}sel={k:sel.k,id:c.id}})}
+function del(){if(!sel)return;act(()=>{if(sel.k=='n')S.nodes=S.nodes.filter(n=>n.id!=sel.id);else S.ribbons=S.ribbons.filter(r=>r.id!=sel.id);sel=null})}
+addEventListener('keydown',e=>{const inp=/INPUT|TEXTAREA/.test(e.target.tagName)&&e.target.type!='checkbox'&&e.target.type!='range';
+ const mod=e.ctrlKey||e.metaKey;
+ if(mod&&e.key=='z'&&!inp){e.preventDefault();e.shiftKey?redo():undo()}
+ else if(mod&&e.key=='y'&&!inp){e.preventDefault();redo()}
+ else if(inp)return;
+ else if(mod&&e.key=='d'){e.preventDefault();dup()}
+ else if(e.key=='Delete'||e.key=='Backspace')del();
+ else if(e.key=='Escape'){sel=null;draw();buildPanel()}
+ else if(sel&&e.key.startsWith('Arrow')){e.preventDefault();const s=e.shiftKey?10:1,dx=e.key=='ArrowLeft'?-s:e.key=='ArrowRight'?s:0,dy=e.key=='ArrowUp'?-s:e.key=='ArrowDown'?s:0;
+  act(()=>{const c=cur();if(sel.k=='n'){const at=attached(c);c.x+=dx;c.y+=dy;at.forEach(q=>{if(q.s){q.r.sx+=dx;q.r.sy+=dy}else{q.r.tx+=dx;q.r.ty+=dy}})}else{c.sx+=dx;c.tx+=dx;c.sy+=dy;c.ty+=dy}})}});
+/* panel (built once per selection, values refreshed in place) */
+const row=(f,l,min,max,st)=>`<div class="row"><label>${l}</label><input type="range" data-f="${f}" min="${min}" max="${max}" step="${st}"><input type="number" data-f="${f}" step="${st}"></div>`;
+const numr=(f,l)=>`<div class="row"><label>${l}</label><input type="number" data-f="${f}" step="1"></div>`;
+const colr=`<div class="row"><label>Color</label><input type="color" data-f="color"></div>`;
+const bord=`<div class="row"><label>Border</label><input type="checkbox" data-f="bon"><input type="color" data-f="bc"></div>`+row('bw','Border width',0.25,10,.25);
+function buildPanel(){
+ if(!sel){pn.innerHTML='<h4>Nothing selected</h4>';return}
+ const c0=cur(),isN=sel.k=='n';if(c0.bon===undefined)c0.bon=isN;if(c0.bw===undefined)c0.bw=isN?.8:1;if(!c0.bc)c0.bc=isN?'#333333':'#888888';
+ pn.innerHTML=sel.k=='n'?`<h4>Node</h4><div class="row"><label>Label</label><input type="text" data-f="label"></div>`+numr('x','X')+numr('y','Y')+row('w','Width',2,300,1)+row('h','Height',2,700,1)+colr+bord
+ :`<h4>Ribbon</h4>`+row('w1','Width start',0,400,1)+row('w2','Width end',0,400,1)+row('curv','Curviness',0,1,.01)+row('op','Opacity',0,1,.01)+numr('sx','Start X')+numr('sy','Start Y')+numr('tx','End X')+numr('ty','End Y')+colr+bord;
+ sync()}
+function sync(){const c=cur();if(!c)return;pn.querySelectorAll('[data-f]').forEach(i=>{if(i.type=='checkbox')i.checked=!!c[i.dataset.f];else if(i!==document.activeElement||i.type=='range')i.value=c[i.dataset.f]})}
+pn.addEventListener('input',e=>{const i=e.target,f=i.dataset.f;if(!f)return;const c=cur();
+ c[f]=i.type=='checkbox'?i.checked:(i.type=='text'||i.type=='color')?i.value:(i.value===''?0:+i.value);
+ pn.querySelectorAll(`[data-f="${f}"]`).forEach(j=>{if(j!==i)j.value=i.value});sch()});
+/* export */
+function svgStr(){const g=cv.querySelector('#out'),b=g.getBBox(),p=10;
+ return`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x-p} ${b.y-p} ${b.width+2*p} ${b.height+2*p}" width="${b.width+2*p}" height="${b.height+2*p}">${g.innerHTML.replace(/ data-[a-z]+="[^"]*"| style="[^"]*"/g,'')}</svg>`}
+function save(b,n){const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click()}
+function dl(t){const s=svgStr();if(t=='svg')return save(new Blob([s],{type:'image/svg+xml'}),'sankey.svg');
+ const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=img.width*4;c.height=img.height*4;const x=c.getContext('2d');x.scale(4,4);x.drawImage(img,0,0);c.toBlob(b=>save(b,'sankey.png'))};
+ img.src=URL.createObjectURL(new Blob([s],{type:'image/svg+xml'}))}
+function cp(){navigator.clipboard.writeText(svgStr())}
+/* autosave + project files */
+const auto=()=>{try{localStorage.setItem('ribbon_editor',JSON.stringify(S))}catch(e){}};
+const fixUid=()=>{uid=Math.max(uid,...S.nodes.map(n=>n.id),...S.ribbons.map(r=>r.id))};
+document.addEventListener('pointerup',()=>setTimeout(auto,20));document.addEventListener('change',auto);
+addEventListener('keyup',auto);
+try{const s=localStorage.getItem('ribbon_editor');if(s)S=JSON.parse(s)}catch(e){}
+fixUid();
+function saveJ(){save(new Blob([JSON.stringify(S,null,1)],{type:'application/json'}),'ribbons_v'+new Date().toISOString().slice(5,16).replace(/[-:T]/g,'')+'.json')}
+lf.onchange=e=>{const f=e.target.files[0];if(!f)return;f.text().then(t=>{pre=JSON.stringify(S);S=JSON.parse(t);fixUid();sel=null;commit();auto();draw();buildPanel()});lf.value=''};
+/* zoom & pan */
+function applyView(redraw){const cw=cv.clientWidth||1200,ch=cv.clientHeight||700;view.h=view.w*ch/cw;
+ cv.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);const s=cw/view.w;
+ cv.style.backgroundSize=`${20*s}px ${20*s}px`;cv.style.backgroundPosition=`${-view.x*s}px ${-view.y*s}px`;if(redraw)sch()}
+function zoomAt(x,y,f){const nw=Math.min(8000,Math.max(60,view.w*f)),s=nw/view.w;view.x=x-(x-view.x)*s;view.y=y-(y-view.y)*s;view.w=nw;applyView(true)}
+function zoomBy(f){zoomAt(view.x+view.w/2,view.y+view.h/2,f)}
+function fit(){const g=cv.querySelector('#out'),b=g&&g.getBBox();if(!b||!(b.width||b.height)){view={x:0,y:0,w:1200,h:700};return applyView(true)}
+ const cw=cv.clientWidth,ch=cv.clientHeight,p=60;view.w=Math.max(b.width+2*p,(b.height+2*p)*cw/ch);view.h=view.w*ch/cw;
+ view.x=b.x+b.width/2-view.w/2;view.y=b.y+b.height/2-view.h/2;applyView(true)}
+cv.addEventListener('wheel',e=>{e.preventDefault();const[x,y]=pt(e);zoomAt(x,y,Math.exp(e.deltaY*(e.ctrlKey?.01:.0015)))},{passive:false});
+addEventListener('keydown',e=>{const t=e.target,inp=/INPUT|TEXTAREA/.test(t.tagName)&&t.type!='checkbox'&&t.type!='range';if(inp||e.ctrlKey||e.metaKey)return;
+ if(e.key==' '){e.preventDefault();spaceDown=true;cv.style.cursor='grab'}
+ else if(e.key=='+'||e.key=='=')zoomBy(.8);else if(e.key=='-')zoomBy(1.25);else if(e.key=='0')fit()});
+addEventListener('keyup',e=>{if(e.key==' '){spaceDown=false;cv.style.cursor=''}});
+addEventListener('resize',()=>applyView(true));applyView(false);draw();buildPanel();
+</script></body></html>
